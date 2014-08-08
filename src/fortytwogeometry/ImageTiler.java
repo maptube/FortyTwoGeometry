@@ -4,13 +4,14 @@
  */
 package fortytwogeometry;
 
-import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Font;
 
 /**
  *
@@ -20,6 +21,7 @@ public class ImageTiler {
   private BufferedImage img=null;
   private String baseFilename;
   //TODO: add an octtree or quadtree recursion switch
+  private Font tileFont = new Font("Serif", Font.BOLD, 32);
   
   public void loadImage() {
     try {
@@ -51,20 +53,44 @@ public class ImageTiler {
     try {
       BufferedImage tile = new BufferedImage(tx,ty,img.getType()); //BufferedImage.TYPE_INT_ARGB
       Graphics2D g2d = (Graphics2D)tile.getGraphics();
+      g2d.setFont(tileFont);
       g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_BILINEAR);
       g2d.setRenderingHint(RenderingHints.KEY_RENDERING,RenderingHints.VALUE_RENDER_QUALITY);
       g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
       //g2d.drawImage(img, 0, 0, tx,ty, null);
+      
+      //DEBUG - set background bright red!!!!
+      //g2d.setColor(Color.RED);
+      //g2d.fillRect(0,0,tx,ty);
+      
+      //right way up image
+      //g2d.drawImage(img,
+      //        0, 0, tx, ty, //destination
+      //        (int)x0, (int)y0, (int)(x0+sx), (int)(y0+sy), //source, absolute pixel box
+      //        null);
+      
+      //invert image
       g2d.drawImage(img,
               0, 0, tx, ty, //destination
-              (int)x0, (int)y0, (int)(x0+sx), (int)(y0+sy), //source, absolute pixel box
+              //(int)x0, (int)y0, (int)(x0+sx), (int)(y0+sy), //source, absolute pixel box
+              (int)x0, (int)(y0+sy), (int)(x0+sx), (int)y0, //source, absolute pixel box
               null);
-      g2d.setColor(Color.RED);
+      //tile outlines in green
+      g2d.setColor(Color.GREEN);
       g2d.drawRect(0, 0, tx, ty);
-      g2d.setColor(Color.WHITE);
-      g2d.fillRect(0,0,50,32);
+      
       g2d.setColor(Color.BLACK);
-      g2d.drawString(tileZ+"_"+tileX+"_"+tileY, 0, 0);
+      g2d.fillRect(0,0,128,32); //black box for tile text
+      
+      g2d.setColor(Color.WHITE); //tile number text in white
+      
+      //upside down text
+      g2d.scale(1, -1); //going to throw the g2d away in a minute, so not point saving state
+      g2d.drawString(tileZ+"_"+tileX+"_"+tileY, 0, -8); //text bottom left of tile here
+      
+      //right way up text (top left of tile)
+      //g2d.drawString(tileZ+"_"+tileX+"_"+tileY, 0, 24); //note font drawing from the baseline
+      
       g2d.dispose();
       
       //this is supposed to be a bad idea
@@ -76,10 +102,15 @@ public class ImageTiler {
       //quadtree recursion
       float sizeX = sx/2;
       float sizeY = sy/2;
-      makeTiles(depth, tileZ+1, (tileX<<1),   (tileY<<1),   x0,       y0,       sizeX, sizeY, tx, ty);
-      makeTiles(depth, tileZ+1, (tileX<<1),   (tileY<<1)+1, x0,       y0+sizeY, sizeX, sizeY, tx, ty);
-      makeTiles(depth, tileZ+1, (tileX<<1)+1, (tileY<<1)+1, x0+sizeX, y0+sizeY, sizeX, sizeY, tx, ty);
-      makeTiles(depth, tileZ+1, (tileX<<1)+1, (tileY<<1),   x0+sizeX, y0,       sizeX, sizeY, tx, ty);
+      //makeTiles(depth, tileZ+1, (tileX<<1),   (tileY<<1),   x0,       y0,       sizeX, sizeY, tx, ty);
+      //makeTiles(depth, tileZ+1, (tileX<<1),   (tileY<<1)+1, x0,       y0+sizeY, sizeX, sizeY, tx, ty);
+      //makeTiles(depth, tileZ+1, (tileX<<1)+1, (tileY<<1)+1, x0+sizeX, y0+sizeY, sizeX, sizeY, tx, ty);
+      //makeTiles(depth, tileZ+1, (tileX<<1)+1, (tileY<<1),   x0+sizeX, y0,       sizeX, sizeY, tx, ty);
+      //inverted tiles
+      makeTiles(depth, tileZ+1, (tileX<<1),   (tileY<<1)+1, x0,       y0,       sizeX, sizeY, tx, ty);
+      makeTiles(depth, tileZ+1, (tileX<<1),   (tileY<<1),   x0,       y0+sizeY, sizeX, sizeY, tx, ty);
+      makeTiles(depth, tileZ+1, (tileX<<1)+1, (tileY<<1),   x0+sizeX, y0+sizeY, sizeX, sizeY, tx, ty);
+      makeTiles(depth, tileZ+1, (tileX<<1)+1, (tileY<<1)+1, x0+sizeX, y0,       sizeX, sizeY, tx, ty);
       
       //octtree recursion
       //TODO:
