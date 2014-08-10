@@ -198,10 +198,11 @@ public class FortyTwoGeometry {
     
     //Tiling
     ImageTiler tiler = new ImageTiler();
-    tiler.loadImage();
+    //tiler.loadImage();
     //tiler.tileImage(3,256,128); //debug fixed settings
     //tiler.tileImage(4,512,256); //debug fixed settings
-    tiler.tileImage(3,1024,512); //debug fixed settings
+    //tiler.tileImage(3,1024,512); //debug fixed settings
+    tiler.runBlueMarble500m(); //OK, I've created a special procedure
   }
   
   /**
