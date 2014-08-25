@@ -196,13 +196,18 @@ public class FortyTwoGeometry {
     //        "C:\\Users\\richard\\Documents\\3dsmax\\import\\42\\railway_polyline_503500_155500_CARTESIAN.obj"
     //        );
     
-    //Tiling
-    ImageTiler tiler = new ImageTiler();
-    //tiler.loadImage();
-    //tiler.tileImage(3,256,128); //debug fixed settings
-    //tiler.tileImage(4,512,256); //debug fixed settings
-    //tiler.tileImage(3,1024,512); //debug fixed settings
-    tiler.runBlueMarble500m(); //OK, I've created a special procedure
+    ////Tiling
+    //ImageTiler tiler = new ImageTiler();
+    ////tiler.loadImage();
+    ////tiler.tileImage(3,256,128); //debug fixed settings
+    ////tiler.tileImage(4,512,256); //debug fixed settings
+    ////tiler.tileImage(3,1024,512); //debug fixed settings
+    //tiler.runBlueMarble500m(); //OK, I've created a special procedure
+    
+    //vector tiling
+    VectorTiler tiler = new VectorTiler();
+    tiler.baseDir="/home/richard/projects/github/GeoGL/data/vectortiles/";
+    tiler.tileShapefileSingleZoom("/home/richard/projects/github/GeoGL/data/os-data/TQ_Building.shp", 12);
   }
   
   /**
