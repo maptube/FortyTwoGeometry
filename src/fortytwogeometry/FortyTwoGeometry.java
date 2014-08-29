@@ -206,8 +206,14 @@ public class FortyTwoGeometry {
     
     //vector tiling
     VectorTiler tiler = new VectorTiler();
-    tiler.baseDir="/home/richard/projects/github/GeoGL/data/vectortiles/";
-    tiler.tileShapefileSingleZoom("/home/richard/projects/github/GeoGL/data/os-data/TQ_Building.shp", 12);
+    //Windows
+    tiler.baseDir="C:\\richard\\github\\GeoGL\\data\\vectortiles\\";
+    //tiler.tileShapefileSingleZoom("C:\\richard\\github\\GeoGL\\data/os-data/TQ_Building.shp", 12);
+    //tiler.tileShapefileSingleZoom("C:\\richard\\github\\GeoGL\\data/os-data/TQ_Building.shp", 13);
+    tiler.tileShapefileSingleZoom("C:\\richard\\github\\GeoGL\\data/os-data/TQ_Building.shp", 14);
+    //Linux on XMesh
+    //tiler.baseDir="/home/richard/projects/github/GeoGL/data/vectortiles/";
+    //tiler.tileShapefileSingleZoom("/home/richard/projects/github/GeoGL/data/os-data/TQ_Building.shp", 12);
   }
   
   /**
