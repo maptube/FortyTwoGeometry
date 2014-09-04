@@ -11,7 +11,9 @@ import java.io.FileWriter;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.ArrayList;
+import java.util.List;
 import org.geotools.data.DefaultTransaction;
 import org.geotools.data.FeatureWriter;
 import org.geotools.data.Transaction;
@@ -40,12 +42,15 @@ import com.vividsolutions.jts.geom.Envelope;
 //import org.geotools.geometry.GeometryBuilder;
 import org.geotools.geometry.jts.GeometryBuilder;
 import com.vividsolutions.jts.geom.MultiPolygon;
+import com.vividsolutions.jts.geom.Polygon;
+import com.vividsolutions.jts.geom.LineString;
 //import org.geotools.geometry.GeometryFactoryFinder;
 //import org.opengis.geometry.coordinate.GeometryFactory;
 //import org.geotools.geometry.jts.ReferencedEnvelope;
 //import org.opengis.geometry.DirectPosition;
 //import org.opengis.geometry.PositionFactory;
 import com.vividsolutions.jts.geom.Coordinate;
+import com.vividsolutions.jts.geom.CoordinateSequence;
 
 
 import org.geotools.geojson.GeoJSON;
@@ -55,13 +60,22 @@ import org.geotools.geojson.geom.GeometryJSON;
 
 //triangulation imports from poly2tri
 import org.poly2tri.Poly2Tri;
-import org.poly2tri.geometry.polygon.Polygon;
+//import org.poly2tri.geometry.polygon.Polygon; //clashes with JTS
 import org.poly2tri.geometry.polygon.PolygonPoint;
 import org.poly2tri.geometry.polygon.PolygonSet;
+import org.poly2tri.triangulation.delaunay.DelaunayTriangle;
+import org.poly2tri.triangulation.TriangulationPoint;
 import org.poly2tri.transform.coordinate.CoordinateTransform;
-import org.poly2tri.triangulation.tools.ardor3d.ArdorMeshMapper;
+//import org.poly2tri.triangulation.tools.ardor3d.ArdorMeshMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.apache.log4j.Level;
 
-
+//YOU NEED:
+//slf4j-1.7.7/slf4j-api-1.7.7.jar
+//apache-log4j-2.0.2-bin/log4j-api-2.0.2.jar
+//apache-log4j-2.0.2-bin/log4j-core-2.0.2.jar
+//apache-log4j-2.0.2-bin/log4j-1.2-api-2.0.2.jar
 
 /**
  *
@@ -168,9 +182,11 @@ public class VectorTiler {
           //This assumes a square world of (-180,-180), (180,180)
           System.out.println(count+"/"+total+" ("+pct+"%) tiles");
           Geometry tileGeom = geomBuilder.box(-180+tileX*size,-180+tileY*size,-180+(tileX+1)*size,-180+(tileY+1)*size);
-          File file = new File(baseDir+zoomLevel+"_"+tileX+"_"+tileY+".geojson");
+          //File file = new File(baseDir+zoomLevel+"_"+tileX+"_"+tileY+".geojson");
+          File file = new File(baseDir+zoomLevel+"_"+tileX+"_"+tileY+".obj");
           if (!file.exists())
-            makeGeoJSONTile(file,tileX,tileY,tileGeom,inFSShape,transform);
+            //makeGeoJSONTile(file,tileX,tileY,tileGeom,inFSShape,transform);
+            makeOBJTile(file,tileX,tileY,tileGeom,inFSShape,transform);
           else
             System.out.println("Skipping: "+file.getName());
           count+=1;
@@ -287,7 +303,10 @@ public class VectorTiler {
    * @param geodeticHeight
    * @return 
    */
-  protected Coordinate toVector(double lon,double lat,double geodeticHeight) {
+  protected PolygonPoint toVector(double lon,double lat,double geodeticHeight) {
+    //HACK for Lat/lon points
+    //return new PolygonPoint(Math.toDegrees(lon),Math.toDegrees(lat),geodeticHeight);
+    
     //WGS84 ellipsoid
 	double a=6378137.0;
 	double b=a;
@@ -333,14 +352,25 @@ public class VectorTiler {
     rSurfacey = rSurfacey + geodeticHeight*ny;
     rSurfacez = rSurfacez + geodeticHeight*nz;
 
-	return new Coordinate(rSurfacex,rSurfacey,rSurfacez);
+	return new PolygonPoint(rSurfacex,rSurfacey,rSurfacez);
   }
   
-  protected Coordinate cross(Coordinate A,Coordinate B) {
-    double x= A.y*B.z-A.z*B.y; // u2v3-u3v2
-    double y= A.z*B.x-A.x*B.z; // u3v1-u1v3
-    double z= A.x*B.y-A.y*B.x; // u1v2-u2v1
-    return new Coordinate(x,y,z);
+  protected PolygonPoint cross(PolygonPoint A,PolygonPoint B) {
+    double x= A.getY()*B.getZ()-A.getZ()*B.getY(); // u2v3-u3v2
+    double y= A.getZ()*B.getX()-A.getX()*B.getZ(); // u3v1-u1v3
+    double z= A.getX()*B.getY()-A.getY()*B.getX(); // u1v2-u2v1
+    return new PolygonPoint(x,y,z);
+  }
+  
+  /**
+   * Test two points for equality which is based on x dist less than epsilon (repeated for y and z)
+   * @param A
+   * @param B
+   * @return 
+   */
+  protected Boolean equal(PolygonPoint A,PolygonPoint B) {
+    double e = 1e8; //Epsilon
+    return (Math.abs(A.getX()-B.getX())<e)&&(Math.abs(A.getX()-B.getX())<e)&&(Math.abs(A.getX()-B.getX())<e);
   }
   
   /**
@@ -350,26 +380,27 @@ public class VectorTiler {
    * @param ring
    * @param HeightMetres 
    */
-  protected void extrudeSidesFromRing(Boolean isClockwise,Coordinate ring[],float HeightMetres) {
-    Coordinate SP0=ring[0]; //need to keep the spherical lat/lon coords and the cartesian coords
-	Coordinate P0 = toVector(Math.toRadians(SP0.x),Math.toRadians(SP0.y),0);
-	for (Coordinate coord : ring) {
+  protected void extrudeSidesFromRing(Boolean isClockwise,LineString ring,float heightMetres) {
+    Coordinate SP0=ring.getCoordinateN(0); //need to keep the spherical lat/lon coords and the cartesian coords
+	PolygonPoint P0 = toVector(Math.toRadians(SP0.x),Math.toRadians(SP0.y),0);
+	for (Coordinate coord : ring.getCoordinates()) {
 		Coordinate SP1=coord;
-		Coordinate P1 = toVector(Math.toRadians(SP1.x),Math.toRadians(SP1.y),0);
-		//is this an epsilon check?
-		if (P0!=P1) //OK, so skipping the first point like this isn't great programming
+		PolygonPoint P1 = toVector(Math.toRadians(SP1.x),Math.toRadians(SP1.y),0);
+		//is this an epsilon check? yes it is now
+		if (!equal(P0,P1)) //OK, so skipping the first point like this isn't great programming
 		{
-			Coordinate P2 = toVector(Math.toRadians(SP1.x),Math.toRadians(SP1.y),HeightMetres);
-			Coordinate P3 = toVector(Math.toRadians(SP0.x),Math.toRadians(SP0.y),HeightMetres);
-			if (isClockwise)
+			PolygonPoint P2 = toVector(Math.toRadians(SP1.x),Math.toRadians(SP1.y),heightMetres);
+			PolygonPoint P3 = toVector(Math.toRadians(SP0.x),Math.toRadians(SP0.y),heightMetres);
+            if (isClockwise)
 			{
 				//glm::vec3 N = glm::cross(P1-P0,P3-P0);
 				//geom.AddFace(P1,P0,P3,green,green,green,N,N,N);
 				//geom.AddFace(P1,P3,P2,green,green,green,N,N,N);
-              Coordinate N = cross(
-                      new Coordinate(P1.x-P0.x,P1.y-P0.y,P1.z-P0.z),
-                      new Coordinate(P3.x-P0.x,P3.y-P0.y,P3.z-P0.z)
-                      );
+              //PolygonPoint N = cross(
+              //        new PolygonPoint(P1.getX()-P0.getX(),P1.getY()-P0.getY(),P1.getZ()-P0.getZ()),
+              //        new PolygonPoint(P3.getX()-P0.getX(),P3.getY()-P0.getY(),P3.getZ()-P0.getZ())
+              //        );
+              PolygonPoint N = computeNormal(P1,P0,P3);
               int idx=points.size();
               points.add(P0); normals.add(N);
               points.add(P1); normals.add(N);
@@ -382,6 +413,18 @@ public class VectorTiler {
 				//glm::vec3 N = glm::cross(P3-P0,P1-P0);
 				//geom.AddFace(P3,P0,P1,green,green,green,N,N,N);
 				//geom.AddFace(P2,P3,P1,green,green,green,N,N,N);
+              //PolygonPoint N = cross(
+              //        new PolygonPoint(P3.getX()-P0.getX(),P3.getY()-P0.getY(),P3.getZ()-P0.getZ()),
+              //        new PolygonPoint(P1.getX()-P0.getX(),P1.getY()-P0.getY(),P1.getZ()-P0.getZ())
+              //        );
+              PolygonPoint N = computeNormal(P3,P0,P1);
+              int idx=points.size();
+              points.add(P0); normals.add(N);
+              points.add(P1); normals.add(N);
+              points.add(P2); normals.add(N);
+              points.add(P3); normals.add(N);
+              faces.add(idx+3); faces.add(idx+0); faces.add(idx+1);
+              faces.add(idx+2); faces.add(idx+3); faces.add(idx+1);
 			}
 		}
 		SP0=SP1;
@@ -389,12 +432,66 @@ public class VectorTiler {
 	}
   }
   
+  /**
+   * Ensures a linestring only contains unique points (within a hardcoded epsilon)
+   * @param points
+   * @return 
+   */
+  public LineString uniquePoints(LineString originalPoints) {
+    ArrayList<Coordinate> uniqueCoords = new ArrayList<Coordinate>();
+    HashSet<String> uniqueKeys = new HashSet<String>(); //contains a hash of coordinates
+    Coordinate coords[] = originalPoints.getCoordinates();
+    for (Coordinate coord : coords) {
+      double deci = 100000; //1,000000 GeoGL uses 10,000,000
+      long x=(long)Math.floor(coord.x*deci);
+      long y=(long)Math.floor(coord.y*deci);
+      long z=(long)Math.floor(coord.z*deci);
+      String key = x+"_"+y; //+"_"+z;
+      if (!uniqueKeys.contains(key)) {
+        uniqueCoords.add(new Coordinate(((double)x)/deci,((double)y)/deci,((double)z)/deci));
+        uniqueKeys.add(key);
+      }
+    }
+    Coordinate ucoords[] = uniqueCoords.toArray(new Coordinate[uniqueCoords.size()]);
+    if (ucoords.length<3) {
+      System.out.println("Degenerate unique LineString");
+    }
+    //very slow point distance check
+    //System.out.println("uniquePoints distance check");
+    //for (int i=0; i<ucoords.length-1; i++) {
+    //  for (int j=i+1; j<ucoords.length; j++) {
+    //    double dist = ucoords[i].distance(ucoords[j]);
+    //    System.out.println("ucoords dist="+dist);
+    //  }
+    //}
+    //System.out.println("uniquePoints: in="+originalPoints.getNumPoints()+" out="+ucoords.length);
+    LineString uniqueLineString = originalPoints.getFactory().createLineString(ucoords);
+    return uniqueLineString;
+  }
+  
+  /**
+   * Compute a normal from 3 planar face points. Return normalised vector.
+   * @param P0
+   * @param P1
+   * @param P2
+   * @return 
+   */
+  public PolygonPoint computeNormal(PolygonPoint P0,PolygonPoint P1,PolygonPoint P2) {
+    PolygonPoint N = cross(
+            new PolygonPoint(P0.getX()-P1.getX(),P0.getY()-P1.getY(),P0.getZ()-P1.getZ()),
+            new PolygonPoint(P2.getX()-P1.getX(),P2.getY()-P1.getY(),P2.getZ()-P1.getZ())
+            );
+    //now normalise it
+    double x=N.getX(), y=N.getY(), z=N.getZ();
+    double mag = Math.sqrt(x*x+y*y+z*z);
+    N.set(x/mag, y/mag, z/mag);
+    return N;
+  }
+  
   //TODO: take a feature and extrude a set of points, normals and faces as a 3d object
   public void makeOBJTile(File file,int tileX,int tileY,Geometry tileGeom,FeatureCollection fc,MathTransform trans) {
     //copy of makeGeoJSONTile, but writes out a triangulated OBJ file instead in Cartesian coords
     System.out.println("writing tile "+tileX+","+tileY+": "+file.getAbsolutePath());
-    
-    ArrayList<PolygonSet> polys = new ArrayList<PolygonSet>();
     
     points = new ArrayList<PolygonPoint>();
     normals = new ArrayList<PolygonPoint>();
@@ -408,7 +505,7 @@ public class VectorTiler {
       //fjson.writeFeatureCollection(fsShape, bw); //easy way
       
       //write preamble for a feature collection - needed if we have to write features manually
-      bw.write("#tile "+tileX+" "+tileY);
+      bw.write("#tile "+tileX+" "+tileY); bw.newLine();
     
       while (fIT.hasNext())
       {
@@ -419,35 +516,96 @@ public class VectorTiler {
         try {
           Geometry transGeom = JTS.transform(geometry, trans);
           if (tileGeom.intersects(transGeom)) {
-            //if (fixGeometry) {
-            //  transGeom = fixInvalidGeometry(transGeom);
-            //  feature.setDefaultGeometry(transGeom);
-            //}
+            //if (fixGeometry)
+            //  transGeom = FortyTwoGeometry.fixInvalidGeometry(transGeom);
             
             //create base ring and top ring here (extruded), with sides
-            //org.poly2tri.
             
-            //create two rings (one extruded from base) and triangulate top
-            Coordinate coords[] = transGeom.getBoundary().getCoordinates();
-            extrudeSidesFromRing(true,coords,100);
+            //OK, I'm only doing multipolygon for now
+            //String geomtype = transGeom.getGeometryType();
+            //System.out.println("geomtype="+geomtype);
+            if (transGeom.getGeometryType().equals("MultiPolygon")) {
+              for (int N=0; N<transGeom.getNumGeometries(); N++) {
+                System.out.println("----POLYGON FID="+feature.getID()+" N="+N+"----");
+                Polygon polygonN = (Polygon)transGeom.getGeometryN(N);
             
-            ArrayList<PolygonPoint> ring = new ArrayList<PolygonPoint>(coords.length);
-            //copy points in
-            for (Coordinate coord : coords) {
-              ring.add(new PolygonPoint(coord.x,coord.y,0));
+                //create two rings (one extruded from base) and triangulate top
+                LineString outer = polygonN.getExteriorRing();
+                extrudeSidesFromRing(true,outer,100); //TODO: 100 is the height //HEIGHT HEIGHT HEIGHT
+                //for all holes: extrude an anticlockwise side
+                for (int i=0; i<polygonN.getNumInteriorRing(); i++) {
+                  extrudeSidesFromRing(false,polygonN.getInteriorRingN(i),100); //HEIGHT HEIGHT HEIGHT //TODO: make sure sides and top have same height
+                }
+                //OK, that's created all the side walls (internal and external), so move on to the top
+            
+                //for the top, we need to make a polygon of the outer ring, then add the holes to it
+                //copy outer points in, but using a unique version of the outer ring this time where duplicate points are removed
+                LineString uniqueouter = uniquePoints(polygonN.getExteriorRing());
+                ArrayList<PolygonPoint> ring = new ArrayList<PolygonPoint>(uniqueouter.getNumPoints());
+                for (int i=0; i<uniqueouter.getNumPoints(); i++) {
+                  Coordinate coord = uniqueouter.getCoordinateN(i);
+                  ring.add(new PolygonPoint(coord.x,coord.y,0));
+                }
+                //create polygon
+                PolygonSet ps = new PolygonSet();
+                org.poly2tri.geometry.polygon.Polygon poly = new org.poly2tri.geometry.polygon.Polygon(ring);
+                //add holes to poly
+                for (int i=0; i<polygonN.getNumInteriorRing(); i++) {
+                  LineString uniqueinner = uniquePoints(polygonN.getInteriorRingN(i)); //unique points version of inner ring for triangulation
+                  ArrayList<PolygonPoint> holepts = new ArrayList<PolygonPoint>(uniqueinner.getNumPoints());
+                  for (int j=0; j<uniqueinner.getNumPoints(); j++) {
+                    Coordinate coord = uniqueinner.getCoordinateN(j);
+                    holepts.add(new PolygonPoint(coord.x,coord.y,0));
+                  }
+                  org.poly2tri.geometry.polygon.Polygon hole = new org.poly2tri.geometry.polygon.Polygon(holepts);
+                  poly.addHole(hole);
+                }
+                //add polygon to polygon set
+                ps.add(poly);
+                try {
+                  Poly2Tri.triangulate(ps); //note triangulation being done on WGS84 points
+                  for( org.poly2tri.geometry.polygon.Polygon p : ps.getPolygons() )
+                  {
+                    HashMap<TriangulationPoint,Integer> pointMap = new HashMap<TriangulationPoint,Integer>(); //mapping between Triangulation points and mesh indexes
+                    List<DelaunayTriangle> tris = p.getTriangles();
+                    for (DelaunayTriangle tri : tris) {
+                      for (int f=0; f<3; f++) {
+                        TriangulationPoint triP = tri.points[f];
+                        //faces add index NOTE: tri.index(A) only gives you 0..2
+                        Integer ix = pointMap.get(triP);
+                        if (ix==null) { //point doesn't exist, so create a new one
+                          ix=new Integer(points.size()); //zero based index
+                          points.add(toVector(triP.getX(),triP.getY(),100)); //HEIGHT HEIGHT HEIGHT!!!!
+                          PolygonPoint VN = computeNormal(
+                                    toVector(tri.points[0].getX(),tri.points[0].getY(),100), //HEIGHT HEIGHT HEIGHT!!!!
+                                    toVector(tri.points[1].getX(),tri.points[1].getY(),100),
+                                    toVector(tri.points[2].getX(),tri.points[2].getY(),100)
+                                  );
+                          normals.add(VN);//UP vector
+                          pointMap.put(triP,ix); //push the point object and index (which is zero based here)
+                        }
+                        faces.add(ix);
+                      }
+                    }
+                  }
+                }
+                catch (Exception e) {
+                  //this is a trap for any triangulation exceptions - need to write out the error, drop the polygon and continue
+                  System.out.println("--------------------TRIANGULATION EXCEPTION");
+                  System.out.println("File: "+file.getName());
+                  for (TriangulationPoint p : poly.getPoints()) {
+                    System.out.println("v "+(p.getX()+0.00782)*10000+" "+(p.getY()-50.8)*10000+" "+p.getZ());
+                  }
+                  System.out.print("f ");
+                  int size = poly.pointCount();
+                  for (int i=1; i<=size; i++) System.out.print(i+" ");
+                  System.out.println();
+                  System.out.println("--------------------END TRIANGULATION EXCEPTION");
+                  System.out.println();
+                }
+            
+              }
             }
-            //holes? maybe these go anti-clockwise?
-            //TriangulationContext ctx = Poly2Tri.
-            PolygonSet ps = new PolygonSet();
-            Polygon poly = new Polygon(ring);
-            ps.add(poly);
-            Poly2Tri.triangulate(ps);
-            for( Polygon p : ps.getPolygons() )
-            {
-            }
-            
-            //TODO: convert to Cartesian here? Extrusion won't work if you do
-            
           }
         }
         catch (org.opengis.referencing.operation.TransformException tex) {
@@ -455,8 +613,48 @@ public class VectorTiler {
         } 
       }
       
+      //HACK - point scaling - this scales the points to a 0..100 cube for 3DS Max to be able to load them
+      /*float minX=points.get(0).getXf(), maxX=points.get(0).getXf();
+      float minY=points.get(0).getYf(), maxY=points.get(0).getYf();
+      float minZ=points.get(0).getZf(), maxZ=points.get(0).getZf();
+      for (PolygonPoint pp: points) {
+        float x=pp.getXf();
+        float y=pp.getYf();
+        float z=pp.getZf();
+        if (x<minX) minX=x;
+        if (x>maxX) maxX=x;
+        if (y<minY) minY=y;
+        if (y>maxY) maxY=y;
+        if (z<minZ) minZ=z;
+        if (z>maxZ) maxZ=z;
+      }
+      float SX=100.0f/(maxX-minX);
+      float SY=100.0f/(maxY-minY);
+      float SZ=100.0f/(maxZ-minZ);
+      */
       
-      //TODO: write out obj file here
+      //and finally, the points, normals and faces should be set, we just have to create an OBJ file
+      System.out.println("points="+points.size()+" faces="+faces.size());
+      for (PolygonPoint pp: points) {
+        //float x=pp.getXf();
+        //float y=pp.getYf();
+        //float z=pp.getZf();
+        //x=(x-minX)*SX; y=(y-minY)*SY; z=(z-minZ)*SZ;
+        //bw.write("v "+x+" "+y+" "+z); bw.newLine();
+        bw.write("v "+pp.getX()+" "+pp.getY()+" "+pp.getZ()); bw.newLine();
+        //bw.flush();
+      }
+      for (PolygonPoint np: normals) {
+        bw.write("vn "+np.getX()+" "+np.getY()+" "+np.getZ()); bw.newLine();
+        //bw.flush();
+      }
+      //note faces are areo based in the faces array, so add 1 to everything for OBJ 1 based
+      for (int i=0; i<faces.size(); i+=3) {
+        int i0=faces.get(i), i1=faces.get(i+1), i2=faces.get(i+2);
+        bw.write("f "+(i0+1)+" "+(i1+1)+" "+(i2+1)); bw.newLine();
+        //bw.flush();
+      }
+      
       bw.close();
     }
     catch (java.io.IOException ioe) {
