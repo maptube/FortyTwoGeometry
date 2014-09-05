@@ -368,9 +368,12 @@ public class VectorTiler {
    * @param B
    * @return 
    */
-  protected Boolean equal(PolygonPoint A,PolygonPoint B) {
-    double e = 1e8; //Epsilon
-    return (Math.abs(A.getX()-B.getX())<e)&&(Math.abs(A.getX()-B.getX())<e)&&(Math.abs(A.getX()-B.getX())<e);
+  protected boolean equal(PolygonPoint A,PolygonPoint B) {
+    double e = 1e-8; //Epsilon
+    double dx=Math.abs(A.getX()-B.getX());
+    double dy=Math.abs(A.getY()-B.getY());
+    double dz=Math.abs(A.getZ()-B.getZ());
+    return (dx<e)&(dy<e)&(dz<e);
   }
   
   /**
@@ -387,7 +390,7 @@ public class VectorTiler {
 		Coordinate SP1=coord;
 		PolygonPoint P1 = toVector(Math.toRadians(SP1.x),Math.toRadians(SP1.y),0);
 		//is this an epsilon check? yes it is now
-		if (!equal(P0,P1)) //OK, so skipping the first point like this isn't great programming
+		if (equal(P0,P1)==false) //OK, so skipping the first point like this isn't great programming
 		{
 			PolygonPoint P2 = toVector(Math.toRadians(SP1.x),Math.toRadians(SP1.y),heightMetres);
 			PolygonPoint P3 = toVector(Math.toRadians(SP0.x),Math.toRadians(SP0.y),heightMetres);
