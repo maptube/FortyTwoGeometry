@@ -360,6 +360,11 @@ public class VectorTiler {
     double y= A.getZ()*B.getX()-A.getX()*B.getZ(); // u3v1-u1v3
     double z= A.getX()*B.getY()-A.getY()*B.getX(); // u1v2-u2v1
     return new PolygonPoint(x,y,z);
+    //glm cross code
+    //return detail::tvec3<T, P>(
+	//		x.y * y.z - y.y * x.z,
+	//		x.z * y.x - y.z * x.x,
+	//		x.x * y.y - y.x * x.y);
   }
   
   /**
@@ -399,11 +404,7 @@ public class VectorTiler {
 				//glm::vec3 N = glm::cross(P1-P0,P3-P0);
 				//geom.AddFace(P1,P0,P3,green,green,green,N,N,N);
 				//geom.AddFace(P1,P3,P2,green,green,green,N,N,N);
-              //PolygonPoint N = cross(
-              //        new PolygonPoint(P1.getX()-P0.getX(),P1.getY()-P0.getY(),P1.getZ()-P0.getZ()),
-              //        new PolygonPoint(P3.getX()-P0.getX(),P3.getY()-P0.getY(),P3.getZ()-P0.getZ())
-              //        );
-              PolygonPoint N = computeNormal(P1,P0,P3);
+              PolygonPoint N = computeNormal(P0,P1,P3);
               int idx=points.size();
               points.add(P0); normals.add(N);
               points.add(P1); normals.add(N);
@@ -416,11 +417,7 @@ public class VectorTiler {
 				//glm::vec3 N = glm::cross(P3-P0,P1-P0);
 				//geom.AddFace(P3,P0,P1,green,green,green,N,N,N);
 				//geom.AddFace(P2,P3,P1,green,green,green,N,N,N);
-              //PolygonPoint N = cross(
-              //        new PolygonPoint(P3.getX()-P0.getX(),P3.getY()-P0.getY(),P3.getZ()-P0.getZ()),
-              //        new PolygonPoint(P1.getX()-P0.getX(),P1.getY()-P0.getY(),P1.getZ()-P0.getZ())
-              //        );
-              PolygonPoint N = computeNormal(P3,P0,P1);
+              PolygonPoint N = computeNormal(P0,P3,P1);
               int idx=points.size();
               points.add(P0); normals.add(N);
               points.add(P1); normals.add(N);
@@ -474,15 +471,15 @@ public class VectorTiler {
   
   /**
    * Compute a normal from 3 planar face points. Return normalised vector.
-   * @param P0
-   * @param P1
-   * @param P2
-   * @return 
+   * @param P0 Common point.
+   * @param P1 First vector is P1-P0
+   * @param P2 Second vector is P2-P0
+   * @return Normalised vector of (P1-P0) X (P2-P0)
    */
   public PolygonPoint computeNormal(PolygonPoint P0,PolygonPoint P1,PolygonPoint P2) {
     PolygonPoint N = cross(
-            new PolygonPoint(P0.getX()-P1.getX(),P0.getY()-P1.getY(),P0.getZ()-P1.getZ()),
-            new PolygonPoint(P2.getX()-P1.getX(),P2.getY()-P1.getY(),P2.getZ()-P1.getZ())
+            new PolygonPoint(P1.getX()-P0.getX(),P1.getY()-P0.getY(),P1.getZ()-P0.getZ()),
+            new PolygonPoint(P2.getX()-P0.getX(),P2.getY()-P0.getY(),P2.getZ()-P0.getZ())
             );
     //now normalise it
     double x=N.getX(), y=N.getY(), z=N.getZ();
@@ -494,6 +491,11 @@ public class VectorTiler {
   //TODO: take a feature and extrude a set of points, normals and faces as a 3d object
   public void makeOBJTile(File file,int tileX,int tileY,Geometry tileGeom,FeatureCollection fc,MathTransform trans) {
     //copy of makeGeoJSONTile, but writes out a triangulated OBJ file instead in Cartesian coords
+    final float extrudeHeight=100; //HEIGHT HEIGHT HEIGHT!!!
+    
+    //HACK! only create one tile:
+    //if ((tileX!=8188)||(tileY!=10537)) return;
+    
     System.out.println("writing tile "+tileX+","+tileY+": "+file.getAbsolutePath());
     
     points = new ArrayList<PolygonPoint>();
@@ -529,15 +531,15 @@ public class VectorTiler {
             //System.out.println("geomtype="+geomtype);
             if (transGeom.getGeometryType().equals("MultiPolygon")) {
               for (int N=0; N<transGeom.getNumGeometries(); N++) {
-                System.out.println("----POLYGON FID="+feature.getID()+" N="+N+"----");
+                //System.out.println("----POLYGON FID="+feature.getID()+" N="+N+"----");
                 Polygon polygonN = (Polygon)transGeom.getGeometryN(N);
             
                 //create two rings (one extruded from base) and triangulate top
                 LineString outer = polygonN.getExteriorRing();
-                extrudeSidesFromRing(true,outer,100); //TODO: 100 is the height //HEIGHT HEIGHT HEIGHT
+                extrudeSidesFromRing(true,outer,extrudeHeight);
                 //for all holes: extrude an anticlockwise side
                 for (int i=0; i<polygonN.getNumInteriorRing(); i++) {
-                  extrudeSidesFromRing(false,polygonN.getInteriorRingN(i),100); //HEIGHT HEIGHT HEIGHT //TODO: make sure sides and top have same height
+                  extrudeSidesFromRing(false,polygonN.getInteriorRingN(i),extrudeHeight);
                 }
                 //OK, that's created all the side walls (internal and external), so move on to the top
             
@@ -569,23 +571,34 @@ public class VectorTiler {
                   Poly2Tri.triangulate(ps); //note triangulation being done on WGS84 points
                   for( org.poly2tri.geometry.polygon.Polygon p : ps.getPolygons() )
                   {
-                    HashMap<TriangulationPoint,Integer> pointMap = new HashMap<TriangulationPoint,Integer>(); //mapping between Triangulation points and mesh indexes
+                    //mapping between Triangulation points and mesh indexes
+                    //Note pointMap is storing the lon/lat coords direct from the rings
+                    HashMap<TriangulationPoint,Integer> pointMap = new HashMap<TriangulationPoint,Integer>();
                     List<DelaunayTriangle> tris = p.getTriangles();
                     for (DelaunayTriangle tri : tris) {
+                      //extract three points from triangle in CCW order
+                      TriangulationPoint triP[]=new TriangulationPoint[3];
+                      triP[0] = tri.points[0]; //start at point 0
+                      triP[1]=tri.pointCCW(triP[0]); //and move round CCW
+                      triP[2]=tri.pointCCW(triP[1]);
+                      PolygonPoint VN=null;
+                      //now move around the triP points which we know are ordered CCW
                       for (int f=0; f<3; f++) {
-                        TriangulationPoint triP = tri.points[f];
-                        //faces add index NOTE: tri.index(A) only gives you 0..2
-                        Integer ix = pointMap.get(triP);
+                        Integer ix = pointMap.get(triP[f]);
                         if (ix==null) { //point doesn't exist, so create a new one
                           ix=new Integer(points.size()); //zero based index
-                          points.add(toVector(triP.getX(),triP.getY(),100)); //HEIGHT HEIGHT HEIGHT!!!!
-                          PolygonPoint VN = computeNormal(
-                                    toVector(tri.points[0].getX(),tri.points[0].getY(),100), //HEIGHT HEIGHT HEIGHT!!!!
-                                    toVector(tri.points[1].getX(),tri.points[1].getY(),100),
-                                    toVector(tri.points[2].getX(),tri.points[2].getY(),100)
+                          //Remember conversion to raidans! triP is lon/lat in degrees
+                          points.add(toVector(Math.toRadians(triP[f].getX()),Math.toRadians(triP[f].getY()),extrudeHeight));
+                          if (VN==null) { //only compute normal for face if we really have to
+                            //remember you need radians conversion on the normal here too!!!!!!
+                            VN = computeNormal(
+                                    toVector(Math.toRadians(triP[0].getX()),Math.toRadians(triP[0].getY()),extrudeHeight),
+                                    toVector(Math.toRadians(triP[1].getX()),Math.toRadians(triP[1].getY()),extrudeHeight),
+                                    toVector(Math.toRadians(triP[2].getX()),Math.toRadians(triP[2].getY()),extrudeHeight)
                                   );
+                          }
                           normals.add(VN);//UP vector
-                          pointMap.put(triP,ix); //push the point object and index (which is zero based here)
+                          pointMap.put(triP[f],ix); //push the point object and index (which is zero based here)
                         }
                         faces.add(ix);
                       }
